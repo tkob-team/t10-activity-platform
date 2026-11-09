@@ -1,0 +1,26 @@
+{
+  "name": "t10-activity-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11 <25"
+  },
+  "scripts": {
+    "prepare:sut": "node scripts/prepare-sut.mjs",
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "python test/browser.py"
+  },
+  "dependencies": {
+    "acorn": "8.16.0",
+    "body-parser": "2.4.0",
+    "cors": "2.8.6",
+    "express": "5.2.1",
+    "jsonwebtoken": "9.0.3",
+    "sqlite3": "6.0.1"
+  },
+  "allowScripts": {
+    "sqlite3@6.0.1": true
+  }
+}

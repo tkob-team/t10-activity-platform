@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T10 Mutation Lab | Operator</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/admin.js"></script></head>
+<body>
+<header class="top"><div class="shell bar"><div class="brand"><span class="monogram">T10</span><strong>Mutation Lab / Điều phối</strong></div></div></header>
+<main class="shell operator">
+  <section class="panel content"><h1>Điều phối phòng</h1>
+    <form id="operator"><label for="key">Khóa điều phối</label><div class="row"><input type="password" id="key" minlength="32" required autocomplete="off"><button class="primary" type="submit">Kết nối</button></div></form>
+    <p id="message" class="muted" role="status"></p>
+    <div id="controls" hidden><dl id="summary"></dl>
+    <section id="failures-panel" hidden><h2>Lỗi chấm gần đây</h2><ul id="recent-failures"></ul></section>
+    <div class="row"><button id="open" type="button">Mở phòng</button><button id="close" type="button">Đóng nhận bài</button><button id="export" type="button">Xuất kết quả JSON</button></div>
+    <form id="new-room"><label for="label">Tên phòng tiếp theo</label><div class="row"><input id="label" minlength="2" maxlength="48" required><button type="submit">Tạo phòng</button></div></form></div>
+  </section>
+</main>
+</body>
+</html>
