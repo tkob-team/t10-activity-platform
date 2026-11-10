@@ -28,8 +28,8 @@ async function call(path, { base = publicUrl, headers = {}, body, status = 200 }
   return { result, cookie:response.headers.get('set-cookie')?.split(';')[0] }
 }
 const host = (path, body, status) => call('/api/host' + path, { base:hostUrl, body, status })
-async function join(name) {
-  const { result, cookie } = await call('/api/join',{ body:{name},status:201 })
+async function join(name, group = '1') {
+  const { result, cookie } = await call('/api/join',{ body:{name,group},status:201 })
   return { ...result, cookie }
 }
 async function getJob(team, id, status = 200) {
@@ -70,7 +70,10 @@ assert.ok(!html.includes('Chạy kiểm tra trên bản gốc') && !html.include
 assert.equal((await fetch(hostUrl + '/admin.js')).status, 200)
 assert.equal((await fetch(publicUrl + '/admin.js')).status, 404)
 await host('/open',{ title:'Automated qualification' },201)
-let sample = await join('Test 01')
+for (const group of [undefined, '', '0', '15', 14]) {
+  await call('/api/join',{body:{name:'Invalid group',group},status:422})
+}
+let sample = await join('Test 01','14')
 const { result: pack } = await call('/api/activity',{ headers:{cookie:sample.cookie} })
 assert.deepEqual(pack.features.map(({id})=>id),['orders','coupons','auth'])
 assert.ok(!JSON.stringify(pack).includes('coupons-120'))
@@ -169,7 +172,7 @@ assert.equal(afterCrash.original.outcome,'ALL_PASS')
 assert.equal(afterCrash.newPoints,0)
 note('Executor child killed with SIGKILL and retried', { submissionId:faultJob.id, points:afterCrash.newPoints })
 
-const teams = [sample,...await Promise.all([2,3,4,5,6].map(i=>join('Test 0'+i)))]
+const teams = [sample,...await Promise.all([2,3,4,5,6].map(i=>join('Test 0'+i,i===2?'lecturer':'1')))]
 const other = teams[1]
 await getJob(other,interrupted.id,404)
 const key = randomUUID()
@@ -198,7 +201,9 @@ elapsed.sort((a,b)=>a-b)
 note('Six-entrant latency summary', { samples:elapsed.length,p50:elapsed[Math.ceil(elapsed.length*.5)-1],p95:elapsed[Math.ceil(elapsed.length*.95)-1],max:elapsed.at(-1) })
 
 const ranking = (await call('/api/ranking')).result
+assert.equal(ranking.maxPoints,poolSize)
 assert.deepEqual(ranking.teams.map(({rank,score})=>[rank,score]),[[1,authPoints],[1,authPoints],[3,0],[3,0],[3,0],[3,0]])
+assert.deepEqual(ranking.teams.slice(0,3).map(({group})=>group),['14','lecturer','1'])
 const stream = await fetch(publicUrl + '/api/ranking/events')
 assert.match(stream.headers.get('content-type'),/text\/event-stream/)
 const reader = stream.body.getReader()
@@ -214,6 +219,7 @@ await receipt(sample,pack.packHash,empty,{status:409})
 assert.equal((await terminal(teams[2],beforeClose.id)).status,'GRADED')
 await host('/exclude',{variant:'auth-47',reason:'Qualification of room-wide revocation'})
 assert.deepEqual((await call('/api/score',{headers:{cookie:sample.cookie}})).result,{points:authPoints-1,maxPoints:poolSize-1})
+assert.equal((await call('/api/ranking')).result.maxPoints,poolSize-1)
 await host('/finalize',{})
 const report = (await host('/report')).result
 assert.equal(report.room.state,'FINALIZED')
@@ -246,7 +252,7 @@ await host('/reset',{roomId:fullReport.room.id})
 assert.deepEqual((await host('/archives/'+fullReport.room.id+'/report')).result,fullReport)
 assert.equal((await host('')).result.state,'WAITING')
 assert.deepEqual((await call('/api/ranking')).result,{state:'WAITING',teams:[]})
-await call('/api/join',{body:{name:'Room reset'},status:409})
+await call('/api/join',{body:{name:'Room reset',group:'1'},status:409})
 
 const previous = (await host('/open',{title:'Archive during grading'},201)).result.id
 const oldTeam = await join('Room reset')

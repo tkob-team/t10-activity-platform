@@ -15,12 +15,14 @@ function show(data) {
   title.textContent = data.title || 'Bảng điểm trực tiếp'
   body.replaceChildren(...data.teams.map(team => {
     const row = element('tr')
-    row.append(element('td', team.rank), element('th', team.name, { scope: 'row' }), element('td', team.score))
+    const group = team.group === 'lecturer' ? 'Giảng viên' : team.group ? 'Nhóm ' + team.group : 'Chưa chọn'
+    row.append(element('td', team.rank), element('th', team.name, { scope: 'row' }),
+      element('td', group), element('td', team.score + '/' + data.maxPoints))
     return row
   }))
   if (!data.teams.length) {
     const row = element('tr')
-    row.append(element('td','Chưa có người chơi',{ colspan:'3' }))
+    row.append(element('td','Chưa có người chơi',{ colspan:'4' }))
     body.append(row)
   }
 }

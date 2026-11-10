@@ -2,7 +2,7 @@
 
 Một activity EShop gồm Cart and Orders, Coupons và Auth với cùng bảng điểm. Nộp bài lấy nội dung từ tab Dựng test hoặc Viết code đang mở. Máy chấm tự kiểm tra original trước khi chạy biến thể.
 
-Pool hiện tại có 69 mutant có đối chứng trong 81 ứng viên. Mỗi mutant phát hiện lần đầu cộng 1 điểm. Tổng điểm của người chơi và điểm tối đa hiện cạnh nút nộp.
+Pool hiện tại có 69 mutant có đối chứng trong 81 ứng viên. Mỗi mutant phát hiện lần đầu cộng 1 điểm. Điểm hiện tại và điểm tối đa hiển thị cạnh nút nộp và trong bảng xếp hạng.
 
 ## Run locally
 
@@ -18,7 +18,7 @@ docker compose up -d --build --wait
 - Host Console mặc định: http://127.0.0.1:8788. Xem `LAB_ADMIN_PORT` nếu cấu hình cổng khác.
 - Projector: đường dẫn `/projector` trên Participant.
 
-Mở Host Console trên máy chạy Docker, đặt tên và mở phòng. Cổng local tự dùng `LAB_ADMIN_KEY` từ `.env` ở phía máy chủ. Khi phòng mở, người có link Participant vào bằng tên hiển thị. Pack và `.env` nằm ngoài Git. Dừng bằng `docker compose stop` để giữ DB và phòng.
+Mở Host Console trên máy chạy Docker, đặt tên và mở phòng. Cổng local tự dùng `LAB_ADMIN_KEY` từ `.env` ở phía máy chủ. Khi phòng mở, người có link Participant nhập tên hiển thị và chọn nhóm. Bảng xếp hạng hiển thị nhóm đã chọn. Pack và `.env` nằm ngoài Git. Dừng bằng `docker compose stop` để giữ DB và phòng.
 
 Chọn **Dọn phiên để mở mới** và xác nhận để dừng chấm phiên hiện tại. Bảng điểm, danh sách người tham gia và phiên đăng nhập của phòng cũ tách khỏi phòng mới. Dùng **Tải báo cáo phiên trước** để tải bản đã lưu, rồi đặt tên và bấm **Mở phòng**.
 

@@ -8,6 +8,8 @@ import { refreshSubmission } from './jobs.ts'
 import { prepareSuite } from './submission.mjs'
 
 const pack = loadPack()
+const packPoints = Object.keys(pack.variants).length
+const maxPointsSql = '$2::int - (SELECT count(*)::int FROM exclusions WHERE room_id=$1)'
 const adminKey = process.env.ADMIN_KEY ?? ''
 const origin = process.env.PUBLIC_ORIGIN || ''
 const publicPort = process.env.PUBLIC_PORT || '8787'
@@ -97,12 +99,14 @@ function page(app: ReturnType<typeof express>, route: string, file: string) {
 
 async function ranking(roomId: string) {
   const { rows } = await db.query(`SELECT r.id AS "roomId",r.title,r.state,r.revision,
+    ${maxPointsSql} AS "maxPoints",
     COALESCE(jsonb_agg(to_jsonb(ranked) ORDER BY ranked.rank,ranked.name) FILTER (WHERE ranked.name IS NOT NULL),'[]') AS teams
     FROM rooms r LEFT JOIN LATERAL (
-      SELECT e.name,count(a.variant)::int AS score,rank() OVER(ORDER BY count(a.variant) DESC)::int AS rank
+      SELECT e.name,e.group_code AS "group",count(a.variant)::int AS score,
+        rank() OVER(ORDER BY count(a.variant) DESC)::int AS rank
       FROM entrants e LEFT JOIN awards a ON a.entrant_id=e.id AND a.revoked_at IS NULL
       WHERE e.room_id=r.id GROUP BY e.id
-    ) ranked ON true WHERE r.id=$1 GROUP BY r.id`, [roomId])
+    ) ranked ON true WHERE r.id=$1 GROUP BY r.id`, [roomId, packPoints])
   return rows[0]
 }
 
@@ -148,13 +152,17 @@ publicApp.get('/api/ranking/events', async (_req, res) => {
 })
 publicApp.post('/api/join', limit(100), async (req, res) => {
   const name = label(req.body?.name, 50)
+  const group = req.body?.group
+  if (typeof group !== 'string' || !/^(?:[1-9]|1[0-4]|lecturer)$/.test(group)) {
+    reject(422, 'Chọn Nhóm 1 đến Nhóm 14 hoặc Giảng viên.')
+  }
   const session = secret()
   const entrant = await tx(async client => {
     const { rows: [room] } = await client.query('SELECT * FROM rooms WHERE id=' + live + ' FOR UPDATE')
     if (room?.state !== 'OPEN') reject(409, 'Phòng chưa mở nhận người chơi.')
     const id = randomUUID()
-    await client.query('INSERT INTO entrants(id,room_id,name,session_hash,recovery_hash) VALUES($1,$2,$3,$4,$5)',
-      [id, room.id, name, sha(session), sha(secret())])
+    await client.query('INSERT INTO entrants(id,room_id,name,session_hash,recovery_hash,group_code) VALUES($1,$2,$3,$4,$5,$6)',
+      [id, room.id, name, sha(session), sha(secret()), group])
     await revise(client, room.id)
     return { id, name, room: room.id }
   })
@@ -184,12 +192,11 @@ publicApp.use('/api', async (req, res, next) => {
 })
 publicApp.get('/api/session', (_req, res) => res.json(res.locals.entrant))
 publicApp.get('/api/activity', (_req, res) => res.json(publicData))
-const packPoints = Object.keys(pack.variants).length
 publicApp.get('/api/score', async (_req, res) => {
   const { id, room } = res.locals.entrant
   const { rows: [score] } = await db.query(`SELECT
-    (SELECT count(*)::int FROM awards WHERE room_id=$1 AND entrant_id=$2 AND revoked_at IS NULL) AS points,
-    $3::int - (SELECT count(*)::int FROM exclusions WHERE room_id=$1) AS "maxPoints"`, [room, id, packPoints])
+    (SELECT count(*)::int FROM awards WHERE room_id=$1 AND entrant_id=$3 AND revoked_at IS NULL) AS points,
+    ${maxPointsSql} AS "maxPoints"`, [room, packPoints, id])
   res.json(score)
 })
 
