@@ -1,5 +1,5 @@
 export const revision = '1be4637e20241054e23b99c8e2412fd2e7cbbc68'
-export const packVersion = 'eshop-1be4637-v2'
+export const packVersion = 'eshop-1be4637-lab-expanded'
 const actor = {label:'Tài khoản fixture', type:'enum', values:['alice','bob','admin']}
 const text = label => ({label,type:'string'})
 const integer = label => ({label,type:'integer'})
@@ -33,22 +33,22 @@ export const scenarios = {
   extended: {label:'Ca kéo dài',bobLockMinute:8,expiryMinute:11,maxUses:3},
   short: {label:'Ca sát biên',bobLockMinute:1,expiryMinute:2,maxUses:1}
 }
-export const problems = [
-  {id:'orders', title:'Cart and Order Integrity', level:'Nâng cao', domain:'cart-orders', minScore:2, ranges:[[284,349]], mutants:['orders-4','orders-68'], files:['test/cart-orders.test.js'],
+export const features = [
+  {id:'orders', title:'Giỏ hàng và đơn hàng', domain:'cart-orders', ranges:[[284,349]], files:['test/cart-orders.test.js'],
     intro:'Kiểm tra tính toàn vẹn của dữ liệu qua nhiều lần gọi và nhiều tài khoản.',
     rules:[
       'Giỏ của mỗi tài khoản bắt đầu rỗng. Thêm sản phẩm lưu đúng dữ liệu và thứ tự; đọc giỏ không làm mất dữ liệu.',
       'Checkout tạo một đơn pending. Chủ đơn có thể hủy đơn pending. Đọc lại chi tiết phải phản ánh trạng thái đã lưu.',
       'Mỗi test dùng dữ liệu mới, với hai khách và một quản trị viên fixture.'
     ]},
-  {id:'coupons', title:'Coupon Lifecycle', level:'Nâng cao', domain:'coupons', minScore:2, ranges:[[356,482]], mutants:['coupons-33','coupons-113'], files:['test/coupons.test.js','test/coupons-flow.test.js'],
+  {id:'coupons', title:'Mã giảm giá', domain:'coupons', ranges:[[356,482]], files:['test/coupons.test.js','test/coupons-flow.test.js'],
     intro:'Theo dõi cấu hình, thời hạn và lịch sử sử dụng của cùng một mã.',
     rules:[
-      'Mã fixture LABFIXED giảm cố định 35.000 trên đơn thỏa ngưỡng 200.000. Dùng giá trị đơn lớn hơn ngưỡng trong đề này.',
+      'Mã fixture LABFIXED giảm cố định 35.000. Dùng giá trị đơn lớn hơn 200.000 khi kiểm tra các quy tắc của mã. Ca đúng bằng ngưỡng có sai khác giữa đặc tả và source gốc, nên không nằm trong phạm vi tính điểm.',
       'Mã hợp lệ đến và gồm thời điểm hết hạn. Sau thời điểm đó hệ thống từ chối.',
       'Số lượt của mã mới tuân theo giá trị cấu hình. Thử áp dụng chỉ tính giá. Lời gọi ghi nhận mới tăng số lượt đã dùng.'
     ]},
-  {id:'auth', title:'Account Recovery at the Lock Boundary', level:'Nâng cao', domain:'auth', minScore:1, ranges:[[32,67],[112,117]], mutants:['auth-32'], files:['test/auth.spec.test.js'],
+  {id:'auth', title:'Đăng nhập và khóa tài khoản', domain:'auth', ranges:[[32,67],[112,117]], files:['test/auth.spec.test.js'],
     intro:'Kiểm tra đồng hồ, trạng thái khóa và độc lập giữa tài khoản.',
     rules:[
       'Một tài khoản đang khóa từ chối đăng nhập nếu đồng hồ còn trước thời điểm hết khóa, kể cả với mật khẩu đúng.',

@@ -1,7 +1,8 @@
 node_modules/
 .runtime/
-data/
 .env
-__pycache__/
-playwright-report/
-test-results/
+.env.*
+!.env.example
+*.log
+/public/editor.js
+/.taste-skill/

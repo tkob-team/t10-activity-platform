@@ -1,473 +1,224 @@
-import {el,node,button} from './ui.js'
-import {loadDraft,saveDraft,selectedRound,rememberRound} from './drafts.js'
-import {createBuilder} from './builder.js'
-import {jobLabel,renderTestOutput,renderRunSummary} from './results.js'
+import { button, createBuilder, element, buildSuite } from './builder.js'
+import { showResult, shortTime, labels, waiting } from './results.js'
 
-const state={room:null,entrant:null,problems:[],problem:null,doc:'rules',cache:new Map(),
-  drafts:new Map(),active:null,history:[],latestScores:[],details:new Map(),viewed:new Map(),roster:[],previewIds:new Map(),
-  sending:false,error:null,view:'work',poll:null,selection:0,loadingProblem:false}
-const statuses={SETUP:'Chưa mở phòng',OPEN:'Đang nhận bài',CLOSED:'Đã đóng nhận bài'}
-const typeLabels={integer:'Số nguyên',number:'Số',string:'Văn bản',boolean:'Có hoặc Không',enum:'Lựa chọn',orderStatus:'Trạng thái đơn'}
+const byId=id=>document.getElementById(id)
+const roomLabels={WAITING:'Chờ mở phòng',OPEN:'Đang nhận bài',PAUSED:'Tạm dừng',CLOSED:'Đã đóng',FINALIZED:'Đã chốt điểm'}
+const sectionNames={orders:'Giỏ hàng và đơn hàng',coupons:'Mã giảm giá',auth:'Đăng nhập'}
+let pack,draft,storageKey,selected,inFlight=false,openIssue,editorTask,activeJob
+let room={state:'WAITING'}
 
-async function api(path,{body,key}={}) {
-  const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{
-    ...(body===undefined?{}:{'content-type':'application/json'}),...(key?{'idempotency-key':key}:{})
-  },body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(10000)})
-  const value=await response.json()
-  if (!response.ok) throw Object.assign(new Error(value.error || 'Yêu cầu chưa hoàn tất.'),{status:response.status})
-  return value
+function load(key,fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
 }
-function draft() {
-  if (!state.problem || !state.entrant) return null
-  const id=state.problem.id
-  if (!state.drafts.has(id)) state.drafts.set(id,loadDraft(state.entrant,id))
-  return state.drafts.get(id)
+function save(key,value) {
+  try { localStorage.setItem(key,JSON.stringify(value)); return true } catch { return false }
 }
-function save() {
-  if (state.problem && state.entrant) saveDraft(state.entrant,state.problem.id,draft())
+function freshId() {
+  const bytes=crypto.getRandomValues(new Uint8Array(16))
+  bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').replace(/^(........)(....)(....)(....)/,'$1-$2-$3-$4-')
 }
-function busy() {return state.loadingProblem||state.sending||Boolean(state.active)||state.room?.state!=='OPEN'}
-function refreshRoom(room) {
-  state.room=room
-  el('room-name').textContent=room.label
-  el('room-state').textContent=statuses[room.state]
-  el('invite-wrap').hidden=!room.inviteRequired
-  el('invite').required=Boolean(room.inviteRequired)
-  el('join-button').disabled=room.state!=='OPEN'
-  el('desk-status').textContent=room.label+' / '+statuses[room.state]
-  updateSubmit()
+async function api(path,body,key) {
+  const response=await fetch('/api/'+path,body===undefined?{}:{
+    method:'POST',headers:{'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:JSON.stringify(body)
+  })
+  const result=await response.json()
+  if (!response.ok) throw Object.assign(new Error(result.error || 'Máy chủ chưa phản hồi.'),{status:response.status})
+  return result
 }
-function showEntry() {
-  state.entrant=null;state.active=null;state.problem=null;state.history=[];state.latestScores=[];state.roster=[];state.error=null
-  state.cache.clear();state.drafts.clear();state.details.clear();state.viewed.clear();state.previewIds.clear()
-  state.selection++;state.loadingProblem=false
-  el('who').textContent='';el('logout').hidden=true;el('desk').hidden=true;el('entry').hidden=false
+function persist() {
+  byId('save-state').textContent=save(storageKey,draft)?'Đã lưu nháp':'Không lưu được nháp'
 }
-function mine() {return state.roster.find(row=>row.id===state.entrant?.id)}
-function renderProblems() {
-  const player=mine()
-  el('problem-list').replaceChildren(...state.problems.map((problem,index)=>{
-    const current=player?.byProblem[problem.id]??0
-    const control=button(String(index+1).padStart(2,'0')+' / '+problem.title,()=>openProblem(problem.id))
-    control.setAttribute('aria-pressed',String(problem.id===state.problem?.id))
-    const passing=current>=problem.minScore
-    control.append(node('span',current+' điểm / Ngưỡng '+problem.minScore+' / '+(passing?'Qua vòng':'Chưa qua vòng'),passing?'small good':'muted small'))
-    return control
-  }))
+function syncRoom() {
+  const state=roomLabels[room.state]
+  byId('room-state').textContent=room.state==='OPEN'?room.title:state
+  byId('room-name').textContent=room.title ?? 'Chưa mở phòng'
+  byId('room-status').textContent=state
+  byId('room-status').dataset.state=room.state
+  const form=byId('join')
+  form.querySelector('button').disabled=room.state!=='OPEN'
+  const submit=byId('submit')
+  submit.disabled=inFlight || room.state!=='OPEN' || Boolean(activeJob)
+  submit.firstChild.textContent=inFlight || activeJob?'Đang chấm ':'Nộp bài '
 }
-function rememberDetail(job) {
-  state.details.delete(job.id)
-  state.details.set(job.id,job)
-  if (state.details.size>24) state.details.delete(state.details.keys().next().value)
-}
-async function readDetail(id) {
-  if (state.details.has(id)) return state.details.get(id)
-  const entrant=state.entrant
-  const {job}=await api('/api/jobs/'+id)
-  if (entrant===state.entrant && job.state==='DONE') rememberDetail(job)
-  return job
-}
-function chosenRun(mode) {
-  const id=state.problem?.id
-  if (!id) return null
-  const chosen=state.details.get(state.viewed.get(id))
-  if (chosen && (!mode || chosen.mode===mode)) return chosen
-  if (state.active?.problem===id && (!mode || state.active.mode===mode)) return state.active
-  const recent=mode==='SCORE'?null:state.history.find(job=>job.problem===id && job.state==='DONE')
-  const summary=recent??state.latestScores.find(job=>job.problem===id)
-  return summary?(state.details.get(summary.id)??summary):null
-}
-async function hydrateRun() {
-  const job=chosenRun()
-  if (!job || job.state!=='DONE' || state.details.has(job.id)) return
-  try {await readDetail(job.id);renderResults()} catch {}
-}
-async function openProblem(id) {
-  const selection=++state.selection
-  state.loadingProblem=true;updateSubmit()
-  try {
-    let problem=state.cache.get(id)
-    if (!problem) {problem=await api('/api/problems/'+id);state.cache.set(id,problem)}
-    if (state.selection!==selection) return
-    state.problem=problem;state.doc='rules';state.error=null;state.loadingProblem=false
-    rememberRound(state.entrant,id)
-    el('problem-title').textContent=problem.title
-    el('round-rule').textContent='Qua vòng từ '+problem.minScore+' điểm. Mỗi mutant mới tính 1 điểm, kể cả sau khi qua vòng.'
-    renderProblems();renderDocs();renderComposer();renderResults()
-    await hydrateRun()
-  } catch(error) {
-    if (state.selection!==selection) return
-    state.loadingProblem=false;showMessage(error.message,true);updateSubmit()
+function codeReader(files) {
+  if (!files.length) return element('p','Chưa có tệp để hiển thị.',{class:'empty'})
+  const reader=element('div',null,{class:'reference-reader'})
+  const bar=element('div',null,{class:'reference-file'})
+  const code=element('code')
+  const pre=element('pre',null,{class:'reference-code',tabindex:'0'})
+  pre.append(code)
+  const open=file=>{
+    code.textContent=file.text
+    pre.setAttribute('aria-label','Mã nguồn '+file.name)
+    pre.scrollTop=0
+    pre.scrollLeft=0
   }
-}
-function renderDocs() {
-  const problem=state.problem
-  if (!problem) return
-  const panel=el('docs')
-  document.querySelectorAll('[data-doc]').forEach(item=>item.setAttribute('aria-pressed',String(item.dataset.doc===state.doc)))
-  panel.replaceChildren()
-  if (state.doc==='rules') {
-    panel.append(node('p',problem.intro,'muted'))
-    const rules=node('ul')
-    for (const rule of problem.rules) rules.append(node('li',rule))
-    panel.append(rules)
-    const fixture=node('details')
-    fixture.append(node('summary','Kịch bản và tài khoản fixture'),node('p','Mốc đồng hồ '+problem.fixture.start,'muted small'))
-    const accounts=node('ul')
-    for (const [name,user] of Object.entries(problem.fixture.accounts)) accounts.append(node('li',name+' / mật khẩu fixture '+user.password))
-    fixture.append(accounts)
-    const presets=node('ul')
-    for (const preset of Object.values(problem.scenarios)) {
-      presets.append(node('li',preset.label+' / Bob hết khóa phút '+preset.bobLockMinute+
-        ' / LABFIXED hết hạn phút '+preset.expiryMinute+' / Giới hạn '+preset.maxUses+' lượt'))
-    }
-    fixture.append(presets)
-    panel.append(fixture)
-  } else if (state.doc==='source' || state.doc==='starter') {
-    const files=state.doc==='source'?problem.source:problem.starter
-    files.forEach((file,index)=>{
-      const item=node('details')
-      item.open=index===0
-      const code=node('pre',file.text)
-      code.tabIndex=0
-      item.append(node('summary',file.name),code);panel.append(item)
-    })
+  if (files.length>1) {
+    const label=element('label','Tệp')
+    const picker=element('select')
+    files.forEach((file,index)=>picker.append(element('option',file.name,{value:String(index)})))
+    picker.addEventListener('change',()=>open(files[Number(picker.value)]))
+    label.append(picker)
+    bar.append(label)
   } else {
-    panel.append(node('p','Các hàm dùng chung cho builder và editor. Kết quả lời gọi có status và body.','muted'))
-    for (const [key,op] of Object.entries(problem.operations)) {
-      const item=node('details')
-      const detail=op.args.map(arg=>arg.label+' ('+(typeLabels[arg.type]||arg.type)+(arg.values?' / '+arg.values.join(', '):'')+')')
-      item.append(node('summary',key+' / '+op.label),node('p',detail.join(', ')||'Không có tham số','small'),
-        node('p','Kết quả có thể kiểm tra: '+Object.keys(op.output).join(', '),'small muted'))
-      panel.append(item)
-    }
+    bar.append(element('strong',files[0].name))
   }
+  open(files[0])
+  reader.append(bar,pre)
+  return reader
 }
-function showMessage(message,isError=false) {
-  el('result').replaceChildren(node('p',message,isError?'error':'muted'))
-}
-function showSubmitError(mode,problemId,previewTest,message) {
-  if (state.problem?.id!==problemId) return
-  if (mode==='SCORE') {showMessage(message,true);return}
-  const data=draft()
-  const output=previewTest
-    ? !el('builder').hidden && data.builder[data.active]?.id===previewTest.id && el('case-output')
-    : !el('code-panel').hidden && el('code-output')
-  if (!output) return
-  const error=node('p',message,'error')
-  error.setAttribute('role','alert')
-  output.replaceChildren(node('h4','Kết quả chạy thử'),error)
-}
-function clearError(id) {
-  if (state.error?.id!==id || state.error.testIndex!==draft()?.active) return
-  state.error=null
-  el(id)?.removeAttribute('aria-invalid')
-  el(id)?.removeAttribute('aria-describedby')
-  el(id)?.parentElement?.removeAttribute('aria-invalid')
-  el(id+'-error')?.remove()
-}
-function onStructure(id) {
-  state.error=null
-  save();renderComposer()
-  if (id) el(id)?.focus()
-}
-const builder=createBuilder({getDraft:draft,getProblem:()=>state.problem,onChange:save,onStructure,
-  onPreview:test=>submit('PREVIEW',test),onOutput:renderOutputs,getError:()=>state.error,clearError})
-
-function renderComposer() {
-  const data=draft()
-  if (!data) return
-  for (const mode of ['builder','code']) {
-    const active=data.mode===mode
-    el(mode+'-tab').setAttribute('aria-selected',String(active))
-    el(mode+'-tab').tabIndex=active?0:-1
+function fixtureReference(fixture) {
+  const data=element('div',null,{class:'reference-fixtures'})
+  const accounts=element('ul')
+  for (const [name,account] of Object.entries(fixture.accounts)) {
+    const row=element('li',name+' / ')
+    row.append(element('code',account.password))
+    accounts.append(row)
   }
-  el('builder').hidden=data.mode!=='builder'
-  el('code-panel').hidden=data.mode!=='code'
-  if (data.mode==='builder') builder.render()
-  else if (el('code').value!==data.code) el('code').value=data.code
-  updateSubmit();renderOutputs()
+  const coupon=fixture.coupon
+  data.append(element('p','Mật khẩu dùng cho các tài khoản kiểm thử.'),accounts,
+    element('p','Mã '+coupon.code+' giảm '+new Intl.NumberFormat('vi-VN').format(coupon.discount)+' đồng.'))
+  return data
 }
-function updateSubmit() {
-  const data=draft(),control=el('submit'),include=el('include')
-  if (!data) {control.disabled=true;return}
-  const hasBuilder=Boolean(data.builder.length),hasCode=Boolean(data.code.trim())
-  control.disabled=busy()||!(hasBuilder&&data.includeBuilder||hasCode&&data.includeCode)
-  control.textContent=state.sending?'Đang gửi...':state.active?.mode==='SCORE'?jobLabel(state.active):'Nộp bộ test'
-  if (el('preview-test')) el('preview-test').disabled=busy()
-  el('preview-code').disabled=busy()||!hasCode
-  el('builder-tab').textContent=hasBuilder?'Dựng test ('+data.builder.length+')':'Dựng test'
-  el('code-tab').textContent=hasCode?'Viết code (bản nháp)':'Viết code'
-  const key=String(hasBuilder)+String(hasCode)
-  if (include.dataset.parts===key) {
-    if (hasBuilder) el('include-builder').checked=data.includeBuilder
-    if (hasCode) el('include-code').checked=data.includeCode
-    return
-  }
-  include.dataset.parts=key;include.replaceChildren()
-  for (const [id,visible,label,property] of [['builder',hasBuilder,'Test dựng bằng form','includeBuilder'],['code',hasCode,'Code tự viết','includeCode']]) {
-    if (!visible) continue
-    const field=node('label'),check=node('input')
-    check.id='include-'+id;check.type='checkbox';check.checked=data[property]
-    check.addEventListener('change',()=>{draft()[property]=check.checked;save();updateSubmit()})
-    field.append(check,document.createTextNode(' '+label));include.append(field)
-  }
-  if (!hasBuilder&&!hasCode) include.append(node('span','Chưa có test','muted small'))
-}
-function payload(mode,previewTest) {
-  const data=draft(),problem=state.problem
-  const tests=mode==='PREVIEW'?(previewTest?[previewTest]:[]):data.includeBuilder?data.builder:[]
-  const code=mode==='PREVIEW'?(previewTest?'':data.code):data.includeCode?data.code:''
-  builder.validate(tests,mode==='PREVIEW')
-  return {problem:problem.id,version:problem.version,builder:tests,code,mode}
-}
-function renderOutputs() {
-  const data=draft()
-  if (!data) return
-  const test=data.builder[data.active]
-  const job=chosenRun()
-  const outputs=job?.result?.original?.results??[]
-  const label=job?.mode==='PREVIEW'?'Chạy thử':'Lượt nộp'
-  const active=state.active?.problem===state.problem?.id?state.active:null
-  const previewId=state.previewIds.get(active?.id)
-  const preview=el('case-output')
-  if (preview && !el('builder').hidden && test) {
-    const viewed=state.viewed.has(state.problem.id)
-    const fallback=viewed?null:[...state.details.values()]
-      .filter(run=>run.problem===state.problem.id && run.result?.original?.results?.some(row=>row.id===test.id))
-      .sort((a,b)=>b.created-a.created)[0]
-    const owner=outputs.some(row=>row.id===test.id)?job:fallback
-    const row=owner?.result?.original?.results?.find(item=>item.id===test.id)
-    const snapshot=owner?.snapshot?.find(item=>item.id===test.id)
-    const changed=snapshot && (snapshot.name!==test.name || snapshot.scenario!==test.scenario ||
-      JSON.stringify(snapshot.steps)!==JSON.stringify(test.steps))
-    const sourceLabel=owner?.mode==='PREVIEW'?'Chạy thử':'Lượt nộp'
-    renderTestOutput(preview,row,{label:sourceLabel+(changed?' / Bản đã chạy trước khi sửa':''),
-      loading:previewId===test.id?jobLabel(active):null})
-  }
-  if (!el('code-panel').hidden) {
-    const rows=outputs.filter(row=>/^case-\d+$/.test(row.id??''))
-    const panel=el('code-output')
-    panel.replaceChildren(node('h3','Output của code'))
-    const runningCode=active?.mode==='PREVIEW' && previewId===null
-    if (runningCode) panel.append(node('p',jobLabel(active),'muted'))
-    else if (!rows.length) panel.append(node('p','Output từng test tự viết xuất hiện sau khi chạy trên bản gốc.','muted'))
-    for (const row of rows) {
-      const item=node('section',undefined,'case-output')
-      renderTestOutput(item,row,{label:row.name+' / '+label})
-      panel.append(item)
-    }
-  }
-}
-function runSnapshot(job) {
-  const item=node('details')
-  item.append(node('summary','Xem các test trong lượt này'))
-  for (const test of job.snapshot) {
-    const box=node('section',undefined,'case-output')
-    const row=job.result?.original?.results?.find(result=>result.id===test.id)
-    box.append(node('h4',test.name),node('pre',JSON.stringify(test.steps,null,2)))
-    const outcome=node('div')
-    renderTestOutput(outcome,row,{label:'Bản gốc'})
-    box.append(outcome)
-    item.append(box)
-  }
-  return item
-}
-function renderResults() {
-  const active=state.active
-  el('active-job').hidden=!active
-  if (active) {
-    const problem=state.problems.find(row=>row.id===active.problem)?.title??active.problem
-    el('active-job').textContent=problem+' / '+jobLabel(active)
-  }
-  const job=chosenRun('SCORE')
-  renderRunSummary(el('result'),job)
-  if (job?.id===state.viewed.get(state.problem?.id) && job?.snapshot) {
-    el('result').append(runSnapshot(job))
-  }
-  renderOutputs()
-}
-function renderHistory() {
-  const list=node('div',undefined,'history-list')
-  for (const job of state.history) {
-    const title=state.problems.find(p=>p.id===job.problem)?.title||job.problem
-    const item=node('div',undefined,'row split history-item')
-    let previewSnapshot
-    item.append(node('span',title+' / '+jobLabel(job)),node('time',new Date(job.created).toLocaleTimeString('vi-VN'),'muted small'))
-    if (job.state==='DONE') item.append(button('Xem lượt này',async()=>{
-      try {
-        const detail=await readDetail(job.id)
-        state.viewed.set(job.problem,detail.id)
-        if (state.problem?.id!==job.problem) await openProblem(job.problem)
-        renderResults()
-        if (detail.mode==='SCORE') el('result').focus()
-        else {
-          previewSnapshot??=runSnapshot(detail)
-          previewSnapshot.open=true
-          item.after(previewSnapshot)
-          previewSnapshot.firstElementChild.focus()
-        }
-      } catch(error) {showMessage(error.message,true)}
-    }))
+function showFeature(feature) {
+  const body=byId('feature-content')
+  const list=element('ol',null,{class:'rules'})
+  for (const [index,rule] of feature.rules.entries()) {
+    const item=element('li')
+    item.append(element('span',String(index+1).padStart(2,'0'),{class:'rule-number','aria-hidden':'true'}),element('p',rule))
     list.append(item)
   }
-  el('history').replaceChildren(state.history.length?list:node('p','Chưa có lượt nộp.','muted'))
-}
-async function submit(mode='SCORE',previewTest=null) {
-  if (busy()) return
-  const problemId=state.problem.id
-  let content
-  try {content=payload(mode,previewTest);state.error=null}
-  catch(error) {
-    if (error.field) {
-      state.error=error.field
-      draft().active=error.field.testIndex;draft().mode='builder'
-      renderComposer();el(error.field.id)?.focus()
-    }
-    showSubmitError(mode,problemId,previewTest,error.message)
-    return
+  body.replaceChildren(list)
+  const links=element('div',null,{class:'segments rule-references',role:'group','aria-label':'Tài liệu tham khảo'})
+  const panel=element('div',null,{id:'reference-content',hidden:''})
+  const references=[
+    ['Source gốc',()=>codeReader(pack.source)],
+    ['Tests có sẵn',()=>codeReader(feature.starters)],
+    ['Tài khoản và mã mẫu',()=>fixtureReference(pack.fixture)]
+  ]
+  for (const [title,render] of references) {
+    const choice=button(title,()=>{
+      const show=choice.getAttribute('aria-expanded')!=='true'
+      for (const item of links.children) item.setAttribute('aria-expanded',String(item===choice && show))
+      panel.hidden=!show
+      panel.replaceChildren(...(show?[render()]:[]))
+    },{'aria-expanded':'false','aria-controls':panel.id})
+    links.append(choice)
   }
-  const data=draft(),entrant=state.entrant
-  const serialized=JSON.stringify(content)
-  if (data.request?.payload!==serialized) data.request={payload:serialized,key:crypto.randomUUID()}
-  save();state.sending=true;updateSubmit()
-  try {
-    const {job}=await api('/api/jobs',{body:content,key:data.request.key})
-    if (entrant!==state.entrant) return
-    data.request=null
-    saveDraft(entrant,content.problem,data)
-    state.viewed.delete(content.problem)
-    if (job.state==='DONE') await refreshJobs()
-    else {
-      state.active={...job,problem:content.problem,mode}
-      if (mode==='PREVIEW') state.previewIds.set(job.id,previewTest?.id??null)
-    }
-    renderResults();schedule(100)
-  } catch(error) {
-    if (error.status===401) showEntry()
-    if ([409,429].includes(error.status)) schedule(800)
-    showSubmitError(mode,problemId,previewTest,error.message)
-  } finally {state.sending=false;updateSubmit()}
+  body.append(links,panel)
+  for (const child of byId('features').children) child.setAttribute('aria-pressed',String(child.dataset.feature===feature.id))
+  draft.feature=feature.id
+  persist()
 }
-async function refreshJobs() {
-  const entrant=state.entrant,prior=state.active
-  const {jobs,latestScores}=await api('/api/jobs')
-  if (entrant!==state.entrant) return
-  state.history=jobs
-  state.latestScores=latestScores
-  state.active=jobs.find(job=>job.state!=='DONE')||null
-  const finished=prior && jobs.find(job=>job.id===prior.id&&job.state==='DONE')
-  if (finished) {
-    state.previewIds.delete(finished.id)
-    await readDetail(finished.id)
-    if (finished.mode==='SCORE') await refreshBoard()
-  }
-  renderHistory();renderResults();updateSubmit()
-  await hydrateRun()
-}
-async function refreshBoard() {
-  const entrant=state.entrant
-  const {rows}=await api('/api/leaderboard')
-  if (entrant!==state.entrant) return
-  state.roster=rows
-  renderProblems()
-  if (state.view==='board') renderBoard()
-}
-function renderBoard() {
-  const holder=node('div',undefined,'table-wrap'),table=node('table'),head=node('thead'),row=node('tr')
-  for (const title of ['Hạng','Tên','Loại',...state.problems.map(p=>p.title),'Tổng điểm']) {
-    const header=node('th',title);header.scope='col';row.append(header)
-  }
-  head.append(row)
-  const body=node('tbody')
-  for (const entry of state.roster) {
-    const line=node('tr',undefined,entry.id===state.entrant?.id?'mine':'')
-    for (const value of [entry.rank,entry.name,entry.kind==='team'?'Nhóm':'Cá nhân']) line.append(node('td',value))
-    for (const problem of state.problems) {
-      const score=entry.byProblem[problem.id]??0
-      const passing=score>=problem.minScore
-      const cell=node('td')
-      cell.append(node('strong',String(score)),node('span',(passing?'Qua vòng':'Chưa qua')+' / ngưỡng '+problem.minScore,passing?'board-note good':'board-note muted'))
-      line.append(cell)
-    }
-    line.append(node('td',entry.score,'board-total'));body.append(line)
-  }
-  table.append(head,body);holder.append(table);el('rankings').replaceChildren(holder)
-}
-function schedule(delay=1300) {
-  clearTimeout(state.poll);state.poll=setTimeout(tick,delay)
-}
-async function tick() {
-  try {
-    const room=await api('/api/room')
-    if (state.entrant && state.entrant.room!==room.id) showEntry()
-    refreshRoom(room)
-    if (state.entrant && !document.hidden) {
-      if (state.active||state.sending) await refreshJobs()
-      if (state.view==='board') await refreshBoard()
-    }
-    schedule(document.hidden?9000:state.active?1300:4500)
-  } catch(error) {
-    if (error.status===401) showEntry()
-    schedule(8000)
+function showTab(tab) {
+  const code=tab==='code'
+  byId('builder-pane').hidden=code
+  byId('code-pane').hidden=!code
+  byId('builder-tab').setAttribute('aria-pressed',String(!code))
+  byId('code-tab').setAttribute('aria-pressed',String(code))
+  byId('submit-error').textContent=''
+  draft.tab=tab
+  persist()
+  if (code && !editorTask) {
+    editorTask=import('./editor.js').then(({mountEditor})=>mountEditor(byId('editor'),draft.code,value=>{draft.code=value;persist()}))
+      .catch(()=>{editorTask=undefined;byId('submit-error').textContent='Không tải được trình soạn code. Hãy thử tải lại trang.'})
   }
 }
 async function enter(entrant) {
-  state.entrant=entrant
-  el('who').textContent=(entrant.kind==='team'?'Nhóm / ':'Cá nhân / ')+entrant.name
-  el('entry').hidden=true;el('desk').hidden=false;el('logout').hidden=false
-  state.problems=(await api('/api/problems')).problems
-  showView('work')
-  const saved=selectedRound(entrant)
-  await openProblem(state.problems.some(round=>round.id===saved)?saved:entrant.assigned)
-  await refreshJobs();await refreshBoard();schedule()
+  pack=await api('activity')
+  storageKey='t10-lab/'+entrant.room+'/'+entrant.id+'/'+pack.packHash
+  draft=load(storageKey,{builder:[],code:'',sequence:0,tab:'builder'})
+  byId('identity').textContent=entrant.name
+  byId('identity').hidden=false
+  byId('entry').hidden=true
+  byId('lab').hidden=false
+  byId('features').replaceChildren(...pack.features.map(feature=>{
+    const choice=button(sectionNames[feature.id] ?? feature.title,()=>showFeature(feature))
+    choice.dataset.feature=feature.id
+    return choice
+  }))
+  byId('operations').replaceChildren(...Object.entries(pack.operations).map(([name,meta])=>
+    element('li',name+'() / '+meta.label+' ('+meta.args.map(arg=>arg.label).join(', ')+')')))
+  openIssue=createBuilder(byId('cases'),draft,pack,persist,byId('case-limit'),byId('add-case'))
+  showTab(draft.tab)
+  showFeature(pack.features.find(feature=>feature.id===draft.feature) ?? pack.features[0])
+  await refresh()
 }
-function showView(name) {
-  state.view=name
-  el('work').hidden=name!=='work';el('board').hidden=name!=='board'
-  el('show-work').classList.toggle('selected',name==='work');el('show-board').classList.toggle('selected',name==='board')
-  if (name==='board') {
-    renderBoard()
-    refreshBoard().catch(error=>el('rankings').textContent=error.message)
+function display(jobs) {
+  activeJob=jobs.find(job=>waiting.has(job.status))
+  syncRoom()
+  const job=jobs.find(item=>item.id===selected) ?? jobs[0]
+  const detail=byId('job-detail')
+  if (job && detail.dataset.key!==JSON.stringify(job)) {
+    showResult(detail,job)
+    detail.dataset.key=JSON.stringify(job)
+  }
+  const history=byId('history')
+  const previous=jobs.filter(item=>item.id!==job?.id)
+  byId('history-panel').hidden=previous.length===0
+  const key=JSON.stringify(previous.map(({id,status,newPoints})=>[id,status,newPoints]))
+  if (history.dataset.key!==key) {
+    history.replaceChildren(...previous.slice(0,12).map(item=>button(
+      shortTime(item.acceptedAt)+'  '+(item.newPoints?'+'+item.newPoints+' điểm':labels[item.status]),
+      ()=>{selected=item.id;display(jobs)},{class:'history-row'})))
+    history.dataset.key=key
   }
 }
-el('join').addEventListener('submit',async event=>{
-  event.preventDefault()
-  const form=new FormData(event.currentTarget)
-  el('entry-error').textContent='';el('join-button').disabled=true
-  try {
-    const {entrant}=await api('/api/join',{body:{name:form.get('name'),kind:form.get('kind'),invite:form.get('invite')}})
-    el('invite').value=''
-    await enter(entrant)
-  } catch(error) {showEntry();el('entry-error').textContent=error.message}
-  finally {el('join-button').disabled=state.room?.state!=='OPEN'}
-})
-el('logout').addEventListener('click',async()=>{
-  try {await api('/api/logout',{body:{}});showEntry();await tick()} catch(error){showMessage(error.message,true)}
-})
-el('show-work').addEventListener('click',()=>showView('work'))
-el('show-board').addEventListener('click',()=>showView('board'))
-el('submit').addEventListener('click',()=>submit())
-el('preview-code').addEventListener('click',()=>submit('PREVIEW'))
-el('code').addEventListener('input',()=>{
-  const data=draft()
-  if (!data) return
-  data.code=el('code').value;save();updateSubmit()
-})
-document.querySelectorAll('[data-doc]').forEach(control=>control.addEventListener('click',()=>{state.doc=control.dataset.doc;renderDocs()}))
-for (const mode of ['builder','code']) {
-  const control=el(mode+'-tab')
-  const change=next=>{if(draft()){draft().mode=next;save();renderComposer()}}
-  control.addEventListener('click',()=>change(mode))
-  control.addEventListener('keydown',event=>{
-    const next=event.key==='Home'?'builder':event.key==='End'?'code':
-      ['ArrowLeft','ArrowRight'].includes(event.key)?(mode==='builder'?'code':'builder'):null
-    if (next) {event.preventDefault();change(next);el(next+'-tab').focus()}
-  })
+async function refresh() {
+  room=await api('room')
+  syncRoom()
+  if (pack) {
+    const [jobs,score]=await Promise.all([api('submissions'),api('score')])
+    display(jobs)
+    const label=score.points+' / '+score.maxPoints
+    const target=byId('player-score')
+    if (target.textContent!==label) target.textContent=label
+  }
 }
-try {
-  refreshRoom(await api('/api/room'))
-  try {const {entrant}=await api('/api/me');await enter(entrant)}
-  catch(error) {if (error.status!==401) throw error}
-} catch(error) {showEntry();el('entry-error').textContent=error.message}
-schedule()
+async function send() {
+  if (inFlight || activeJob || room.state!=='OPEN') return
+  byId('submit-error').textContent=''
+  try {
+    const code=draft.tab==='code'?draft.code:''
+    const builder=draft.tab==='code'?[]:buildSuite(draft.builder,pack)
+    if (!builder.length && !code.trim()) throw new Error('Thêm test trong tab đang mở rồi nộp bài.')
+    const body={builder,code,mode:'SCORE',packHash:pack.packHash}
+    const fingerprint=JSON.stringify(body)
+    const previous=load(storageKey+'/request',{})
+    const key=previous.fingerprint===fingerprint?previous.key:freshId()
+    save(storageKey+'/request',{fingerprint,key})
+    inFlight=true;syncRoom()
+    const receipt=await api('submissions',body,key)
+    selected=receipt.id
+    activeJob=receipt
+    const detail=byId('job-detail')
+    showResult(detail,{status:'QUEUED'})
+    detail.dataset.key=''
+    save(storageKey+'/request',{})
+    await refresh()
+  } catch (error) {
+    if (error.id) openIssue(error)
+    byId('submit-error').textContent=error.message
+  } finally {inFlight=false;syncRoom()}
+}
+byId('join').addEventListener('submit',async event=>{
+  event.preventDefault()
+  try {
+    byId('join-error').textContent=''
+    await enter(await api('join',Object.fromEntries(new FormData(event.currentTarget))))
+  } catch (error) {byId('join-error').textContent=error.message}
+})
+byId('builder-tab').addEventListener('click',()=>showTab('builder'))
+byId('code-tab').addEventListener('click',()=>showTab('code'))
+byId('submit').addEventListener('click',send)
+const resume=new URLSearchParams(location.hash.slice(1)).get('resume')
+if (resume) history.replaceState(null,'',location.pathname+location.search)
+const session=resume?api('recover',{recovery:resume}):api('session')
+session.then(enter).catch(error=>{if (error.status!==401) byId('join-error').textContent=error.message})
+async function tick() {
+  try {await refresh()}
+  catch (error) {if (pack && error.status===401) location.reload()}
+  finally {setTimeout(tick,pack?1100:3000)}
+}
+tick()

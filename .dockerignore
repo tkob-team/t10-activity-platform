@@ -1,0 +1,7 @@
+node_modules
+.runtime
+.git
+.env*
+*.log
+public/editor.js
+.taste-skill

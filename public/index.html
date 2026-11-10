@@ -1,74 +1,71 @@
 <!doctype html>
-<html lang="vi">
+<html lang="vi" data-type="software">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>T10 Mutation Lab</title>
-<link rel="stylesheet" href="/styles.css">
-<script type="module" src="/app.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="page-type" content="software">
+  <meta name="site-kind" content="software">
+  <meta name="description" content="Thiết kế bộ test cho EShop và xem test phát hiện được mutant nào.">
+  <meta name="editor-style-nonce" content="EDITOR_STYLE_NONCE">
+  <title>T10 Mutation Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
-<header class="top"><div class="shell bar"><div class="brand"><span class="monogram">T10</span><div><strong>Mutation Lab</strong><span>Software Testing Seminar</span></div></div><div id="who" class="who"></div><button id="logout" class="quiet" type="button" hidden>Thoát phiên</button></div></header>
-<main class="shell">
-  <section id="entry" class="entry">
-    <div class="intro"><p class="kicker">CSC13003 / IN-CLASS ACTIVITY</p><h1>Kill the<br>Mutant.</h1><p>Đọc đặc tả EShop, tìm khoảng trống trong tests và chứng minh bộ test của bạn phát hiện được thay đổi.</p><div class="method"><span>01 Đọc đề</span><span>02 Viết test</span><span>03 Xem điểm</span></div></div>
-    <div class="panel entry-panel">
-      <p class="kicker">PHÒNG THI</p><h2 id="room-name">Seminar T10</h2><p id="room-state" class="muted" role="status">Đang đọc trạng thái phòng...</p>
-      <form id="join">
-        <fieldset><legend>Tham gia với vai trò</legend><div class="row"><label><input type="radio" name="kind" value="individual" required> Cá nhân</label><label><input type="radio" name="kind" value="team"> Nhóm</label></div></fieldset>
-        <label for="name">Tên hiển thị</label><input id="name" name="name" maxlength="48" minlength="2" required autocomplete="off">
-        <div id="invite-wrap" hidden><label for="invite">Mã vào phòng</label><input id="invite" name="invite" maxlength="120" autocomplete="off" type="password"></div>
-        <button id="join-button" class="primary" type="submit" disabled>Vào phòng thi</button>
-      </form>
-      <p class="muted small">Phiên được giữ trên trình duyệt này. Tải lại trang để tiếp tục làm bài.</p>
-      <p id="entry-error" class="error" role="alert"></p>
-    </div>
-  </section>
-
-  <section id="desk" hidden>
-    <div class="desk-head"><div><p class="kicker">PHÒNG THỰC NGHIỆM</p><h1>Bộ đề EShop</h1><p id="desk-status" class="muted"></p></div>
-      <nav class="row" aria-label="Phòng thi"><button id="show-work" class="selected" type="button">Làm bài</button><button id="show-board" type="button">Bảng xếp hạng</button></nav>
-    </div>
-    <p id="active-job" class="notice" role="status" aria-live="polite" hidden></p>
-    <div id="work">
-      <nav id="problem-list" class="problems" aria-label="Danh sách đề"></nav>
-      <div class="workspace">
-        <details class="panel reading reference" open>
-          <summary class="panel-head"><span class="kicker">HỒ SƠ VÒNG</span><span id="problem-title" class="reference-title">Đang tải đề...</span></summary>
-          <p id="round-rule" class="round-rule muted"></p>
-          <nav class="tabs" aria-label="Tài liệu của đề">
-            <button type="button" data-doc="rules" aria-pressed="true">Đặc tả</button>
-            <button type="button" data-doc="source" aria-pressed="false">Source</button>
-            <button type="button" data-doc="starter" aria-pressed="false">Tests có sẵn</button>
-            <button type="button" data-doc="api" aria-pressed="false">API</button>
-          </nav>
-          <div class="content" id="docs"></div>
-        </details>
-        <div class="work-column">
-          <section class="panel compose">
-            <div class="panel-head"><p class="kicker">BẢN NHÁP</p><h2>Soạn bộ test</h2></div>
-            <div class="tabs" role="tablist" aria-label="Cách soạn test">
-              <button id="builder-tab" type="button" role="tab" aria-selected="true" aria-controls="builder" data-mode="builder">Dựng test</button>
-              <button id="code-tab" type="button" role="tab" aria-selected="false" aria-controls="code-panel" data-mode="code" tabindex="-1">Viết code</button>
-            </div>
-            <div id="builder" class="content" role="tabpanel" aria-labelledby="builder-tab"></div>
-            <div id="code-panel" class="content" role="tabpanel" aria-labelledby="code-tab" hidden>
-              <label for="code"><strong>Code test của đội</strong></label>
-              <p id="code-hint" class="muted small">Dùng test hoặc it, const, await sut.hàm và expect. Tất cả tên hàm và tham số nằm trong tab API.</p>
-              <textarea id="code" aria-describedby="code-hint" spellcheck="false" placeholder="test('Tên test', async () => {&#10;  // Gọi hàm qua sut và kiểm tra bằng expect.&#10;})"></textarea>
-              <details><summary>Cú pháp và kịch bản dữ liệu</summary><p class="muted small">Các matcher gồm toBe, toEqual, toBeGreaterThan và toBeLessThan. Có thể tham chiếu kết quả trước, như result.body.orderId. Dùng <code>test('Tên', 'extended', async () =&gt; {...})</code> để chọn kịch bản. Các mã là standard, extended và short khi phòng hỗ trợ.</p></details>
-              <div class="row output-actions"><button id="preview-code" type="button" class="secondary" disabled>Chạy thử code</button><span class="muted small">Chạy trên bản gốc</span></div>
-              <div id="code-output" class="case-output"></div>
-            </div>
-            <div class="submitbar"><div><strong class="small">Đưa vào lượt nộp</strong><div id="include" class="row"></div></div><button id="submit" type="button" class="primary" disabled>Nộp bộ test</button></div>
-          </section>
-          <section id="result" class="panel result" role="status" aria-live="polite" tabindex="-1"></section>
-          <details class="panel history"><summary>Lịch sử lượt nộp</summary><div id="history"></div></details>
-        </div>
+  <a class="skip" href="#main">Đến nội dung chính</a>
+  <header class="top"><div class="top-inner">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">T</span><span>Mutation Lab<small>CSC13003 / T10</small></span></a>
+    <div class="top-actions"><span id="identity" class="identity" hidden></span><a href="/projector" class="nav-link">Bảng xếp hạng <span aria-hidden="true">↗</span></a></div>
+  </div></header>
+  <main id="main" class="wrap">
+    <section id="entry" class="entry hero">
+      <div><p class="eyebrow">Software Testing</p><h1>Săn mutant<br>trong EShop</h1><p class="lede">Tìm một hành vi mà bộ test hiện tại bỏ sót. Viết test để phát hiện biến thể làm sai hành vi đó.</p></div>
+      <div class="join-box">
+        <h2>Tham gia phòng</h2><p id="room-state" class="muted" role="status">Đang kết nối…</p>
+        <form id="join">
+          <label>Tên hiển thị<input name="name" maxlength="50" required autocomplete="nickname"></label>
+          <button class="primary">Vào phòng <span aria-hidden="true">→</span></button>
+        </form>
+        <p id="join-error" class="error" role="alert"></p>
+      </div>
+    </section>
+    <div id="lab" hidden>
+      <section class="hero joined">
+        <div><p class="eyebrow">Bài thực hành / EShop</p><h1>Săn mutant trong EShop</h1><p class="lede">Chọn quy tắc cần kiểm tra, viết test và nộp. Mỗi mutant mới được phát hiện cộng một điểm.</p></div>
+        <div class="room-note"><span class="eyebrow">Phòng hiện tại</span><strong id="room-name"></strong><span id="room-status" class="chip"></span></div>
+      </section>
+      <section class="rulebook" aria-labelledby="rule-title">
+        <div class="section-head"><div><p class="eyebrow">01 / Quy tắc</p><h2 id="rule-title">Đọc hành vi của EShop</h2></div><div id="features" class="segments" aria-label="Tính năng"></div></div>
+        <div id="feature-content"></div>
+      </section>
+      <div class="workbench">
+        <section class="author" aria-labelledby="author-title">
+          <div class="section-head"><div><p class="eyebrow">02 / Bộ test</p><h2 id="author-title">Soạn bài</h2></div><small id="save-state" class="muted"></small></div>
+          <div class="tabs" aria-label="Cách soạn">
+            <button id="builder-tab" aria-pressed="true" type="button">Dựng test</button>
+            <button id="code-tab" aria-pressed="false" type="button">Viết code</button>
+          </div>
+          <div id="builder-pane">
+            <div class="case-toolbar"><button id="add-case" class="secondary" type="button"><span aria-hidden="true">+</span> Thêm tình huống</button><small id="case-limit" class="muted"></small></div>
+            <div id="cases"></div>
+          </div>
+          <div id="code-pane" hidden>
+            <div class="editor-shell"><div class="editor-bar"><span>tests.js</span><span>JavaScript</span></div><div id="editor"></div></div>
+            <details class="reference"><summary>Cú pháp và hàm có sẵn</summary><p class="muted">Dùng <code>test</code>, <code>sut</code> và <code>expect</code>. Có thể truyền mã dữ liệu làm tham số thứ hai của <code>test</code>: <code>standard</code>, <code>short</code> hoặc <code>extended</code>.</p><ul id="operations"></ul></details>
+          </div>
+          <div class="submit-bar">
+            <p id="submit-error" class="error" role="alert"></p>
+            <div class="submit-score" aria-live="polite"><small>Điểm của bạn</small><strong id="player-score">Đang tải…</strong></div>
+            <button id="submit" class="primary" type="button">Nộp bài <span aria-hidden="true">→</span></button>
+          </div>
+        </section>
+        <section class="results-panel" aria-labelledby="result-title">
+          <p class="eyebrow">03 / Chấm bài</p><h2 id="result-title">Kết quả</h2>
+          <div id="job-detail" aria-live="polite"><p class="empty">Kết quả sẽ xuất hiện sau khi nộp bài.</p></div>
+          <details id="history-panel" class="reference" hidden><summary>Lịch sử nộp bài</summary><div id="history"></div></details>
+        </section>
       </div>
     </div>
-    <section id="board" class="panel reading" hidden><div class="panel-head"><p class="kicker">ĐIỂM PHÁT HIỆN</p><h2>Bảng xếp hạng</h2><p class="muted">Mỗi mutant được tính một lần. Điểm vượt ngưỡng vẫn cộng vào tổng. Cùng tổng điểm thì đồng hạng.</p></div><div id="rankings" class="content"></div></section>
-  </section>
-</main>
+  </main>
 </body>
 </html>

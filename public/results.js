@@ -1,57 +1,65 @@
-import {node} from './ui.js'
+import { element } from './builder.js'
 
-const outcomeLabels={PASS:'Pass',ASSERTION:'Fail assertion',TIMEOUT:'Quá thời gian',RUN_ERROR:'Lỗi chạy'}
-export function jobLabel(job) {
-  if (!job) return ''
-  if (job.state==='QUEUED') return job.mode==='PREVIEW'?'Đang đợi chạy thử':'Đang đợi chấm bài'
-  if (job.state==='RUNNING') return job.mode==='PREVIEW'?'Đang chạy thử trên bản gốc...':'Bot đang chấm bài...'
-  const result=job.result
-  if (result?.status==='PREVIEW') return 'Chạy thử / '+(outcomeLabels[result.original?.status]??'Đã hoàn tất')
-  if (result?.status==='GRADED') return (result.passed?'Qua vòng':'Chưa qua vòng')+' / +'+result.newPoints+' điểm'
-  return {ORIGINAL_FAILED:'Bản gốc fail',RUN_ERROR:'Lỗi thực thi',TIMEOUT:'Vượt thời gian',SYSTEM_ERROR:'Máy chấm gặp lỗi'}[result?.status] || 'Đã hoàn tất'
+export const waiting = new Set(['QUEUED','VERIFYING_ORIGINAL','EVALUATING'])
+export const labels = {
+  QUEUED:'Đang đợi chấm',VERIFYING_ORIGINAL:'Đang chấm',EVALUATING:'Đang chấm',
+  ORIGINAL_FAILED:'Có test chưa đạt',GRADED:'Đã chấm',REVIEW_REQUIRED:'Cần kiểm tra',
+  ALL_PASS:'Đạt',ASSERTION_MISMATCH:'Chưa đạt',TIMEOUT:'Hết thời gian chạy',
+  INFRA_FAILURE:'Lỗi máy chấm',SUT_RUNTIME_ERROR:'Lỗi khi chạy test'
 }
-function detailFailure(failure) {
-  return failure.path+' / Mong đợi '+failure.expected+' / Thực tế '+failure.actual
+export const shortTime=value=>new Intl.DateTimeFormat('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(value))
+const comparators={toBe:'Bằng',toEqual:'Bằng',toBeGreaterThan:'Lớn hơn',toBeLessThan:'Nhỏ hơn',toContain:'Có chứa'}
+
+function banner(tone, title, copy) {
+  const item=element('div',null,{class:'result-banner '+tone})
+  item.append(element('strong',title))
+  if (copy) item.append(element('p',copy))
+  return item
 }
-export function renderTestOutput(box,row,{label,loading}={}) {
-  if (!box) return
-  box.replaceChildren(node('h4','Kết quả chạy'))
-  if (loading) {box.append(node('p',loading,'muted'));return}
-  if (!row) {box.append(node('p','Output trên bản gốc sẽ hiện tại đây sau khi chạy.','muted'));return}
-  box.append(node('p',(label?label+' / ':'')+(outcomeLabels[row.status]??row.status),row.status==='PASS'?'good':'error'))
-  if (row.failure) box.append(node('p',detailFailure(row.failure),'error small'))
-  const outputs=row.outputs??[]
-  for (const [index,value] of outputs.entries()) {
-    const output=node('details',undefined,'output-row')
-    output.open=index===outputs.length-1
-    let body=value.body
-    try {body=JSON.stringify(JSON.parse(body),null,2)} catch {}
-    output.append(node('summary',value.ref+' / '+value.operation+' / HTTP '+value.http),node('pre',body))
-    box.append(output)
+export function failedCases(original) {
+  const list=element('div',null,{class:'failed-list'})
+  for (const row of original?.results ?? []) {
+    if (row.outcome==='ALL_PASS') continue
+    const card=element('article',null,{class:'failed-case'})
+    card.append(element('strong',row.name))
+    const failures=row.steps.filter(step=>step.pass===false)
+    if (!failures.length) card.append(element('p',labels[row.outcome] ?? 'Kiểm tra lại cách gọi hàm.'))
+    for (const step of failures) {
+      const values=element('dl')
+      const matcher=step.matcher ?? (original.failure?.testId===row.id ? original.failure.matcher : undefined)
+      for (const [label,value] of [
+        [matcher ? 'Mong đợi ('+(comparators[matcher] ?? matcher)+')' : 'Mong đợi',step.expected],
+        ['Nhận được',step.actual]
+      ]) {
+        const dd=element('dd')
+        dd.append(element('code',value))
+        values.append(element('dt',label),dd)
+      }
+      card.append(element('p','Bước '+(step.index+1)),values)
+    }
+    list.append(card)
   }
-  if (!row.outputs?.length) box.append(node('p','Không có output từ lời gọi.','muted small'))
+  return list
 }
-export function renderRunSummary(box,job) {
-  if (!job) {
-    box.replaceChildren(node('h3','Kết quả lượt nộp'),node('p','Chưa có lượt nộp cho vòng này.','muted'))
+export function showResult(container, job) {
+  if (waiting.has(job.status)) {
+    const status=banner('pending','Bot đang chấm bài...','Kết quả sẽ tự cập nhật tại đây.')
+    status.prepend(element('span',null,{class:'spinner','aria-hidden':'true'}))
+    container.replaceChildren(status)
     return
   }
-  if (job.state!=='DONE') {
-    const status=node('div',undefined,'loading')
-    const spinner=node('span',undefined,'spinner')
-    spinner.setAttribute('aria-hidden','true')
-    status.append(spinner,node('span',jobLabel(job)))
-    box.replaceChildren(status)
-    return
+  const rows=job.original?.results ?? []
+  const failed=rows.filter(row=>row.outcome!=='ALL_PASS').length
+  const summary=rows.length ? (rows.length-failed)+'/'+rows.length+' test đạt' : ''
+  if (job.status==='ORIGINAL_FAILED') {
+    container.replaceChildren(banner('negative','Có '+failed+' test chưa đạt',summary),failedCases(job.original))
+  } else if (job.status==='REVIEW_REQUIRED') {
+    const message=failed ? 'Xem các test gặp lỗi bên dưới.' : 'Điều phối viên có thể xem và chấm lại lượt bị gián đoạn.'
+    const points=job.newPoints ? ' Đã ghi nhận +'+job.newPoints+' điểm.' : ''
+    container.replaceChildren(banner('caution','Bài cần kiểm tra lại',message+points),failedCases(job.original))
+  } else if (job.newPoints) {
+    container.replaceChildren(banner('positive','+'+job.newPoints+' điểm','Phát hiện '+job.newPoints+' mutant mới.'),element('p',summary,{class:'result-summary'}))
+  } else {
+    container.replaceChildren(banner('neutral','Chưa có điểm mới',summary ? summary+'. Lượt này chưa phát hiện thêm mutant.' : 'Lượt chấm đã kết thúc.'))
   }
-  const result=job.result
-  box.replaceChildren(node('h3',jobLabel(job),result?.status==='GRADED'||result?.original?.status==='PASS'?'good':'error'))
-  if (result?.status==='GRADED') {
-    const c=result.counts??{}
-    box.append(node('p','Bản gốc pass '+result.original.tests+' test. Lượt này phát hiện '+(c.KILLED??0)+
-      ' mutant mới, '+(c.SURVIVED??0)+' còn sống, '+(c.TIMEOUT??0)+' timeout, '+(c.RUN_ERROR??0)+' lỗi chạy.'))
-    if (result.threshold) box.append(node('p','Điểm vòng '+result.score+' / ngưỡng '+result.threshold+
-      '. '+(result.alreadyCredited?'Bỏ qua '+result.alreadyCredited+' mutant đã được ghi điểm.':''),'muted small'))
-  }
-  if (result?.original?.failure) box.append(node('p',detailFailure(result.original.failure),'error small'))
 }

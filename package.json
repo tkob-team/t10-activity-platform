@@ -1,16 +1,20 @@
 {
-  "name": "t10-activity-platform",
-  "version": "0.1.0",
+  "name": "t10-mutation-lab",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=24.11 <25"
+    "node": ">=24.16 <25"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "prepare:sut": "node scripts/prepare-sut.mjs",
-    "start": "node src/server.mjs",
-    "test": "node --test test/*.test.mjs",
-    "test:browser": "python test/browser.py"
+    "build:editor": "esbuild src/editor.mjs --bundle --format=esm --minify --outfile=public/editor.js",
+    "test": "node --test test/*.test.ts",
+    "migrate": "node src/migrate.ts",
+    "start": "node src/web.ts",
+    "scheduler": "node src/scheduler.ts",
+    "executor": "node src/executor.ts"
   },
   "dependencies": {
     "acorn": "8.16.0",
@@ -18,7 +22,17 @@
     "cors": "2.8.6",
     "express": "5.2.1",
     "jsonwebtoken": "9.0.3",
+    "pg": "8.16.3",
     "sqlite3": "6.0.1"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
+    "esbuild": "0.28.2"
   },
   "allowScripts": {
     "sqlite3@6.0.1": true

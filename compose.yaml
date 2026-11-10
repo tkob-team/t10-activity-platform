@@ -1,0 +1,108 @@
+name: t10-mutation-lab
+x-app: &app
+  image: t10-mutation-lab:local
+  build: .
+  init: true
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  read_only: true
+  tmpfs: [/tmp]
+x-pack: &pack
+  type: bind
+  source: ./.runtime/pack.json
+  target: /lab/pack.json
+  read_only: true
+  bind:
+    create_host_path: false
+x-db-env: &db-env
+  PGHOST: db
+  PGUSER: lab
+  PGDATABASE: lab
+  PGPASSWORD: ${LAB_DB_PASSWORD:?Run npm run setup first}
+  SUT_PACK_FILE: /lab/pack.json
+services:
+  db:
+    image: postgres:17.9-bookworm@sha256:47f917f7409eacd22fc5dfb1dee634e1b55cf0c01d1a7eb701be2227a03e0641
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_DB: lab
+      POSTGRES_PASSWORD: ${LAB_DB_PASSWORD:?Run npm run setup first}
+    volumes: [db-data:/var/lib/postgresql/data]
+    networks: [db-net]
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U lab -d lab"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  migrate:
+    <<: *app
+    command: [node, src/migrate.ts]
+    restart: "no"
+    environment: *db-env
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [db-net]
+  web:
+    <<: *app
+    command: [node, src/web.ts]
+    environment:
+      <<: *db-env
+      ADMIN_KEY: ${LAB_ADMIN_KEY:?Run npm run setup first}
+      PUBLIC_ORIGIN: ${LAB_PUBLIC_ORIGIN:-}
+      PUBLIC_PORT: ${LAB_PUBLIC_PORT:-8787}
+      ADMIN_PORT: ${LAB_ADMIN_PORT:-8788}
+    volumes: [*pack]
+    ports:
+      - "${LAB_BIND_ADDRESS:-127.0.0.1}:${LAB_PUBLIC_PORT:-8787}:8787"
+    networks: [ingress, db-net, host-net]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    mem_limit: 256m
+  host-console:
+    <<: *app
+    command: [node, src/host-gateway.ts]
+    environment:
+      ADMIN_KEY: ${LAB_ADMIN_KEY:?Run npm run setup first}
+      ADMIN_PORT: ${LAB_ADMIN_PORT:-8788}
+    ports:
+      - "127.0.0.1:${LAB_ADMIN_PORT:-8788}:8788"
+    networks: [host-net]
+    depends_on:
+      web: {condition: service_started}
+    mem_limit: 128m
+  scheduler:
+    <<: *app
+    command: [node, src/scheduler.ts]
+    environment:
+      <<: *db-env
+      EXECUTOR_URL: http://executor:8789
+      EXECUTOR_KEY: ${LAB_EXECUTOR_KEY:?Run npm run setup first}
+      JUDGE_SLOTS: ${LAB_JUDGE_SLOTS:-2}
+      LEASE_MS: ${LAB_LEASE_MS:-12000}
+    volumes: [*pack]
+    networks: [db-net, exec-net]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      executor: {condition: service_started}
+    mem_limit: 256m
+  executor:
+    <<: *app
+    command: [node, src/executor.ts]
+    environment:
+      SUT_PACK_FILE: /lab/pack.json
+      EXECUTOR_KEY: ${LAB_EXECUTOR_KEY:?Run npm run setup first}
+      JUDGE_SLOTS: ${LAB_JUDGE_SLOTS:-2}
+    volumes: [*pack]
+    networks: [exec-net]
+    mem_limit: 768m
+    pids_limit: 96
+networks:
+  ingress: {}
+  host-net: {}
+  db-net: {internal: true}
+  exec-net: {internal: true}
+volumes:
+  db-data: {}

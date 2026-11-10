@@ -1,18 +1,81 @@
 <!doctype html>
-<html lang="vi">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>T10 Mutation Lab | Operator</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/admin.js"></script></head>
-<body>
-<header class="top"><div class="shell bar"><div class="brand"><span class="monogram">T10</span><strong>Mutation Lab / Điều phối</strong></div></div></header>
-<main class="shell operator">
-  <section class="panel content"><h1>Điều phối phòng</h1>
-    <form id="operator"><label for="key">Khóa điều phối</label><div class="row"><input type="password" id="key" minlength="32" required autocomplete="off"><button class="primary" type="submit">Kết nối</button></div></form>
-    <p id="message" class="muted" role="status"></p>
-    <div id="controls" hidden><dl id="summary"></dl>
-    <section id="failures-panel" hidden><h2>Lỗi chấm gần đây</h2><ul id="recent-failures"></ul></section>
-    <div class="row"><button id="open" type="button">Mở phòng</button><button id="close" type="button">Đóng nhận bài</button><button id="export" type="button">Xuất kết quả JSON</button></div>
-    <form id="new-room"><label for="label">Tên phòng tiếp theo</label><div class="row"><input id="label" minlength="2" maxlength="48" required><button type="submit">Tạo phòng</button></div></form></div>
-  </section>
-</main>
+<html lang="vi" data-type="software">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="page-type" content="software"><meta name="site-kind" content="software">
+  <meta name="description" content="Điều phối phòng, theo dõi bài nộp và xử lý sự cố chấm.">
+  <title>Điều phối | T10 Mutation Lab</title>
+  <link rel="stylesheet" href="/styles.css"><script src="/admin.js" type="module"></script>
+</head>
+<body class="host">
+  <a class="skip" href="#main">Đến nội dung chính</a>
+  <header class="top"><div class="top-inner">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">T</span><span>Mutation Lab<small>ĐIỀU PHỐI</small></span></a>
+    <span id="connection" class="muted"></span>
+  </div></header>
+  <main id="main" class="wrap">
+    <section id="access" class="entry hero">
+      <div><p class="eyebrow">T10 / Host</p><h1>Điều phối phòng</h1><p class="lede">Theo dõi bài nộp, điểm và những lượt cần xử lý.</p></div>
+      <div class="join-box">
+        <h2>Kết nối máy chấm</h2>
+        <p id="login-status" class="muted" role="status">Đang kết nối…</p>
+        <form id="connect" hidden>
+          <label>Khóa điều phối<input type="password" name="key" required autocomplete="off"></label>
+          <button class="primary">Kết nối</button>
+        </form>
+        <p id="login-error" class="error" role="alert"></p>
+      </div>
+    </section>
+    <div id="control" hidden>
+      <div class="host-heading">
+        <div><p class="eyebrow">Điều phối phòng</p><h1 id="host-title">Tổng quan</h1><span id="state" class="chip"></span></div>
+        <div class="room-actions">
+          <a id="projector" class="secondary" target="_blank" rel="noopener">Bảng chiếu ↗</a>
+          <button type="button" id="export" class="secondary">Xuất báo cáo</button>
+          <button type="button" id="archive-report" class="secondary" hidden>Tải báo cáo phiên trước</button>
+          <button type="button" data-action="pause" class="secondary">Tạm dừng</button>
+          <button type="button" data-action="resume" class="primary">Tiếp tục nhận bài</button>
+          <button type="button" data-action="close" class="secondary">Đóng nhận bài</button>
+          <button type="button" data-action="finalize" class="primary">Chốt điểm</button>
+          <button type="button" id="reset" class="secondary" hidden>Dọn phiên để mở mới</button>
+        </div>
+      </div>
+      <p id="error" class="error" role="alert"></p>
+      <p id="host-notice" class="muted" role="status"></p>
+      <section class="surface" id="new-room" hidden>
+        <h2>Mở phòng mới</h2>
+        <form id="open" class="room-form open-room">
+          <label>Tên phòng<input name="title" required maxlength="80" value="T10 Mutation Lab"></label>
+          <button class="primary">Mở phòng</button>
+        </form>
+      </section>
+      <div class="overview" id="overview" aria-label="Thống kê phòng"></div>
+      <div id="host-content" class="host-content">
+        <section class="surface teams" aria-labelledby="teams-title">
+          <div class="section-head"><h2 id="teams-title">Người tham gia</h2><label class="search-label"><span class="sr-only">Tìm theo tên</span><input id="team-search" type="search" placeholder="Tìm theo tên…"></label></div>
+          <div class="table-scroll"><table><thead><tr><th scope="col">Tên</th><th scope="col">Điểm</th><th scope="col">Lượt nộp</th><th scope="col">Tình trạng</th><th scope="col">Nộp gần nhất</th></tr></thead><tbody id="team-rows"></tbody></table></div>
+        </section>
+        <section class="surface" id="team-detail" hidden aria-labelledby="detail-title">
+          <div class="section-head"><div><p class="eyebrow">Chi tiết người tham gia</p><h2 id="detail-title"></h2></div><div class="room-actions"><button id="recovery" class="secondary">Cấp liên kết vào lại</button><button id="hide-detail" class="text-button">Đóng chi tiết</button></div></div>
+          <div id="recovery-link" hidden></div>
+          <div id="team-history"></div>
+          <div id="submission-detail" hidden></div>
+        </section>
+        <section class="surface" aria-labelledby="review-title">
+          <div class="section-head"><h2 id="review-title">Cần xử lý</h2><span id="review-count" class="chip"></span></div>
+          <div id="review"></div>
+          <details id="exclude-panel" class="reference" hidden>
+            <summary>Loại mutant cho cả phòng</summary>
+            <p class="muted">Điểm từng được cấp cho mutant này sẽ được thu hồi.</p>
+            <form id="exclude" class="room-form">
+              <label>ID mutant<input name="variant" required></label>
+              <label>Lý do<input name="reason" maxlength="180" required></label>
+              <button class="secondary">Xác nhận loại</button>
+            </form>
+          </details>
+        </section>
+      </div>
+    </div>
+  </main>
 </body>
 </html>

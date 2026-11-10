@@ -3,7 +3,7 @@ import {operations,scenarios} from './catalog.mjs'
 
 const namePattern = /^[A-Za-z_$][\w$]{0,31}$/
 const banned = new Set(['__proto__','prototype','constructor'])
-export const matchers = ['toBe','toEqual','toBeGreaterThan','toBeLessThan']
+export const matchers = ['toBe','toEqual','toBeGreaterThan','toBeLessThan','toContain']
 const allowed = (object,key) => typeof key === 'string' && Object.hasOwn(object,key)
 const fail = message => { throw new Error(message) }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
